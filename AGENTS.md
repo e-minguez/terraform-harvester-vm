@@ -1,0 +1,126 @@
+# AGENTS.md
+
+Guidelines for AI agents (Copilot, Codex, etc.) working in this repository.
+
+## Repository layout
+
+```
+terraform-harvester-vm/
+├── image/
+│   ├── main.tf       # Image management — provider, harvester_image, terraform_data upload
+│   ├── variables.tf  # kubeconfig, image_source (upload|download), image vars
+│   ├── outputs.tf    # image_id, image_name, image_namespace, image_state
+│   └── versions.tf   # Terraform and provider version constraints
+├── vm/
+│   ├── main.tf       # VM management — provider, data.harvester_image lookup, harvester_virtualmachine (count-based)
+│   ├── variables.tf  # kubeconfig, vm vars, vm_count, mac_addresses, image_name/namespace (no image_source)
+│   ├── outputs.tf    # vm_names, vm_ids, image_id
+│   └── versions.tf   # Terraform and provider version constraints
+├── harvester-vm.sh         # Non-interactive shell wrapper orchestrating both modules
+├── assets/           # Project assets (e.g., images for documentation)
+├── examples/
+│   ├── local-image/  # image/ module, upload mode
+│   ├── url-image/    # image/ module, download mode
+│   └── existing-image/ # vm/ module only (image already exists)
+├── README.md
+├── LICENSE
+└── AGENTS.md         # This file
+```
+
+The two modules have **separate state files** and are applied independently. Destroying the `vm/` module never touches resources owned by the `image/` module.
+
+## How to validate changes
+
+Always run these after editing any `.tf` file:
+
+```sh
+# Modules
+terraform -chdir=image validate
+terraform -chdir=vm validate
+
+# Examples
+terraform -chdir=examples/local-image validate
+terraform -chdir=examples/url-image validate
+terraform -chdir=examples/existing-image validate
+```
+
+For `harvester-vm.sh`, check syntax with:
+
+```sh
+bash -n harvester-vm.sh
+```
+
+There are no automated tests beyond `terraform validate` and `bash -n`. Do not add new testing frameworks.
+
+## Key design decisions
+
+### Decoupled modules
+`image/` and `vm/` are independent root modules with separate `.terraform/` state directories. This is intentional: `terraform destroy` on `vm/` only destroys the VM. Use `--destroy-image` in `harvester-vm.sh` to also destroy the image explicitly.
+
+### Upload flow
+
+`harvester_image.upload` and `terraform_data.upload_image` run **concurrently** within a single `terraform apply` — there is intentionally **no `depends_on`** between them. Adding one creates a deadlock (each waits for the other to finish first).
+
+`terraform_data.upload_image` is a `local-exec` provisioner that:
+1. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until the `Initialized` CDI condition appears.
+2. Streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"`.
+3. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
+
+`harvester-vm.sh` is a pure Terraform wrapper: it writes `.tfvars` files and calls `terraform apply`. All upload logic lives inside the module. There is no separate shell-side upload.
+
+### vm/ always uses a data source
+The `vm/` module never manages image lifecycle. It always looks up the image via `data "harvester_image" "image"`. There is no `image_source` variable in `vm/`.
+
+### No external YAML tools
+Kubeconfig parsing uses `yamldecode(file(var.kubeconfig_path))` — Terraform built-in. Do not introduce `kubectl`, `yq`, or any shell-based YAML parsing.
+
+### `curl` for binary upload
+`terraform-provider-restapi` is JSON-only and cannot stream binary files. `curl` is the only viable tool for the `?action=upload` endpoint. Do not attempt to replace it with an HTTP provider.
+
+### Heredoc escaping in `image/main.tf`
+Inside `<<-SHELL` heredocs, Terraform template directives are active:
+- Shell variables must be written as `$${VAR}` (double `$`)
+- `curl` format strings must be written as `%%{http_code}` (double `%`)
+
+Breaking this escaping will cause `terraform validate` to fail with `invalid template control keyword`.
+
+### `filemd5()` guard
+`filemd5(var.local_image_path)` is evaluated at plan time. It must be wrapped in a ternary:
+```hcl
+var.local_image_path != "" ? filemd5(var.local_image_path) : ""
+```
+Never call it unconditionally.
+
+### Plan-time validation
+Use `lifecycle.precondition` for cross-variable checks that `variable` validation blocks cannot express (e.g. "field X is required when field Y equals Z"). Preconditions must only reference Terraform-known values — not shell commands or runtime state.
+
+## Conventions
+
+- **Terraform version** — `>= 1.4` minimum (required for the built-in `terraform_data` resource).
+- **Resource naming** — all Kubernetes resource names must be lowercase alphanumeric + hyphens. Validated by `variable` validation blocks in both `image/variables.tf` and `vm/variables.tf` (regex `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`). `sanitize_k8s_name()` in `harvester-vm.sh` auto-derives a valid name from the image filename.
+- **`image/` image_source** — only `"upload"` and `"download"` are valid. `"existing"` is not a valid value for the `image/` module; when the image already exists, skip the `image/` module entirely.
+- **`vm/` has no image_source** — the `vm/` module always looks up the image by name via a data source. Do not add an `image_source` variable to `vm/`.
+- **Count-gated resources** — `harvester_image.download` and `harvester_image.upload` are mutually exclusive via `count = var.image_source == "..." ? 1 : 0`. Access them as `harvester_image.upload[0]`.
+- **`vm_count` multi-VM** — `harvester_virtualmachine.vm` uses `count = var.vm_count`. When `vm_count = 1` the name is `var.vm_name`; when `> 1` names are `${var.vm_name}-${count.index}`. Outputs `vm_names` and `vm_ids` are always lists (splat `[*]`).
+- **`mac_addresses`** — a `list(string)` in `vm/`. Each entry is matched positionally to the VM at that index. The `lifecycle.precondition` rejects lists longer than `vm_count`. Shell script accepts a comma-separated value for `--mac-address`.
+- **Network reference format** — `"${namespace}/${name}"`, e.g. `"default/vlan10"`.
+- **harvester-vm.sh destroy flags** — `--destroy-vm` (VM only), `--destroy-image` (image only), `--destroy-all` (VM first, then image). Default (no destroy flag) = apply both modules.
+- **`--vm-namespace` is required** — no default is provided in `harvester-vm.sh` to prevent accidental deployments into the wrong namespace.
+- **`efi` boot** — `vm/variables.tf` has `efi` (bool, default `true`). `harvester-vm.sh` maps `--boot uefi` → `efi = true` and `--boot bios` → `efi = false`.
+- **No cloud-init, no SSH keys** — out of scope for this module.
+
+## What agents should not do
+
+- Do not merge `image/` and `vm/` back into a single module — the decoupling is intentional.
+- Do not add a `depends_on` from `terraform_data.upload_image` to `harvester_image.upload` — this deadlocks (each waits for the other).
+- Do not add `image_source` to the `vm/` module — the vm module always uses a data source lookup.
+- Do not remove or weaken `lifecycle.precondition` blocks.
+- Do not replace the `curl` binary upload with an HTTP/REST provider.
+- Do not remove or weaken `variable` validation blocks or `lifecycle.precondition` blocks — format and constraint validation lives in the Terraform modules.
+- Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
+- Do not modify `%%{http_code}` or `$${VAR}` escaping in the heredoc.
+- Do not default `--vm-namespace` in `harvester-vm.sh` — it is intentionally required to prevent accidental deployment into the wrong namespace.
+- Do not change the `harvester-vm.sh` tfvars mechanism to use individual `-var` flags — the generated `.tfvars` files are intentionally kept on disk for plain `terraform destroy -var-file=...` usage.
+- Do not add new providers beyond `harvester/harvester` without a clear reason.
+- Do not flatten `vm_names`/`vm_ids` outputs back to singular values — they are always lists to support `vm_count > 1`.
+- Do not replace `mac_addresses` (list) with a single `mac_address` string — the list design supports per-VM MAC assignment with `count`.

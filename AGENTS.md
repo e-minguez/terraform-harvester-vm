@@ -118,6 +118,8 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - **`--vm-namespace` is required** — no default is provided in `harvester-vm.sh` to prevent accidental deployments into the wrong namespace.
 - **`TF_CMD` / `--tofu`** — `harvester-vm.sh` auto-detects the binary: prefers `terraform` if found in `PATH`, falls back to `tofu`. Users can override with `TF_CMD=tofu` env var or the `--tofu` flag. All `terraform -chdir=` calls in the script use `$TF_CMD`.
 - **`efi` boot** — `vm/variables.tf` has `efi` (bool, default `true`). `harvester-vm.sh` maps `--boot uefi` → `efi = true` and `--boot bios` → `efi = false`.
+- **`harvester_virtualmachine` timeouts** — `create = 10m`, `update = 10m`, `delete = 5m`. The default provider timeout (2 min) is not enough: VM creation involves cloning the root disk from the image and waiting for a DHCP lease (`wait_for_lease = true`).
+- **Image format/size warnings in `harvester-vm.sh`** — before handing off to Terraform, the script checks the image file and prints warnings to stderr for: (1) raw format (detected via `qemu-img info` if available, else extension), (2) sparse file (logical > 5× physical), (3) large file (> 2 GiB). All three recommend `qemu-img convert -O qcow2`. These checks run only for `upload` mode during `apply`.
 - **No cloud-init, no SSH keys** — out of scope for this module.
 
 ## What agents should not do
@@ -139,4 +141,5 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not add new providers beyond `harvester/harvester` without a clear reason.
 - Do not shorten the provider source `registry.terraform.io/harvester/harvester` back to `harvester/harvester` — the bare shorthand breaks OpenTofu, which resolves it to `registry.opentofu.org/harvester/harvester`.
 - Do not flatten `vm_names`/`vm_ids` outputs back to singular values — they are always lists to support `vm_count > 1`.
-- Do not replace `mac_addresses` (list) with a single `mac_address` string — the list design supports per-VM MAC assignment with `count`.
+- Do not remove or reduce the `timeouts` block on `harvester_virtualmachine` — 10 m create/update is required for disk cloning and DHCP lease acquisition.
+- Do not remove the image format/size warnings from `harvester-vm.sh` — they prevent silent uploads of multi-GB raw or sparse files that would exhaust CDI or exceed nginx body limits.

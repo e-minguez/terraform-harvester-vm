@@ -378,10 +378,36 @@ TFVARS
   info "Image tfvars saved to $IMAGE_TFVARS_FILE"
 
   if [[ "$action" == "apply" && "$IMAGE_SOURCE" == "upload" ]]; then
-    # Warn about sparse files before handing off to Terraform.
-    local logical_size disk_size_bytes
+    local logical_size disk_size_bytes image_format=""
     logical_size=$(stat -c %s "$IMAGE_FILE" 2>/dev/null || stat -f %z "$IMAGE_FILE" 2>/dev/null || echo 0)
     disk_size_bytes=$(du -b "$IMAGE_FILE" 2>/dev/null | cut -f1 || echo 0)
+    local outbase="${IMAGE_FILE%.*}"
+
+    # Detect image format: prefer qemu-img (authoritative), fall back to extension.
+    if command -v qemu-img &>/dev/null; then
+      image_format=$(qemu-img info "$IMAGE_FILE" 2>/dev/null | awk '/^file format:/{print $3}')
+    fi
+    if [[ -z "$image_format" ]]; then
+      case "${IMAGE_FILE,,}" in
+        *.raw|*.img) image_format="raw"   ;;
+        *.qcow2)     image_format="qcow2" ;;
+        *.vmdk)      image_format="vmdk"  ;;
+      esac
+    fi
+
+    # Warn: raw format — qcow2 stores only allocated blocks and uploads much faster.
+    if [[ "$image_format" == "raw" ]]; then
+      echo "" >&2
+      echo "WARNING: $IMAGE_FILE is a raw disk image." >&2
+      echo "         Raw images transfer every allocated block; qcow2 stores only" >&2
+      echo "         the data actually written, typically reducing upload size by" >&2
+      echo "         50-90% and avoiding reverse-proxy body-size limits." >&2
+      echo "         Convert before uploading (Harvester/KubeVirt supports qcow2 natively):" >&2
+      echo "           qemu-img convert -f raw -O qcow2 ${IMAGE_FILE} ${outbase}.qcow2" >&2
+      echo "" >&2
+    fi
+
+    # Warn: sparse file (logical size >> physical disk usage).
     if [[ "$disk_size_bytes" -gt 0 && "$logical_size" -gt $((disk_size_bytes * 5)) ]]; then
       echo "" >&2
       echo "WARNING: $IMAGE_FILE is a sparse file." >&2
@@ -390,9 +416,24 @@ TFVARS
       echo "         Uploading the full logical size may exceed reverse-proxy body limits" >&2
       echo "         and is much slower than necessary." >&2
       echo "         Convert to qcow2 first (recommended — stores only allocated blocks):" >&2
-      echo "           qemu-img convert -f raw -O qcow2 ${IMAGE_FILE} image.qcow2" >&2
+      echo "           qemu-img convert -f raw -O qcow2 ${IMAGE_FILE} ${outbase}.qcow2" >&2
       echo "         Or convert to a dense raw file:" >&2
-      echo "           qemu-img convert -f raw -O raw  ${IMAGE_FILE} image-dense.raw" >&2
+      echo "           qemu-img convert -f raw -O raw  ${IMAGE_FILE} ${outbase}-dense.raw" >&2
+      echo "" >&2
+    fi
+
+    # Warn: large file (> 2 GiB) — upload will take several minutes.
+    local large_threshold=$(( 2 * 1024 * 1024 * 1024 ))
+    if [[ "$logical_size" -gt "$large_threshold" ]]; then
+      local size_gib=$(( logical_size / 1024 / 1024 / 1024 ))
+      echo "" >&2
+      echo "WARNING: Image is large (${size_gib} GiB). Upload may take several minutes" >&2
+      echo "         depending on your network bandwidth to the Harvester cluster." >&2
+      if [[ "$image_format" != "qcow2" ]]; then
+        echo "         Converting to qcow2 before uploading is strongly recommended" >&2
+        echo "         to reduce the upload size:" >&2
+        echo "           qemu-img convert -O qcow2 ${IMAGE_FILE} ${outbase}.qcow2" >&2
+      fi
       echo "" >&2
     fi
   fi

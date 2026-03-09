@@ -399,22 +399,25 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
   | python3 -m json.tool | grep -E '"state"|RetryLimit|Initialized'
 ```
 
-### Sparse files and image format
+### Image format and size warnings
 
-Raw disk images are often **sparse files** — the logical size reported by the filesystem (e.g. 35 GB) is much larger than the actual on-disk data (e.g. 1.2 GB). Uploading a sparse file transfers all the zero blocks too, which can:
+`harvester-vm.sh` checks the image file before handing off to Terraform and prints warnings for any of the following conditions:
 
-- Exceed the reverse-proxy request body size limit (Rancher nginx defaults to ~10 GB).
-- Significantly slow down the upload.
+| Condition | Detection | Recommendation |
+|---|---|---|
+| **Raw format** | `qemu-img info` (if available), else file extension (`.raw`, `.img`) | Convert to qcow2 |
+| **Sparse file** | Logical size > 5× actual disk usage | Convert to qcow2 or dense raw |
+| **Large file** | Logical size > 2 GiB | Convert to qcow2 if not already; expect a long upload |
 
-`harvester-vm.sh` detects sparse files automatically (logical size > 5× disk usage) and prints a warning before uploading.
+**Raw images** transfer every allocated block. qcow2 stores only the data actually written, typically reducing upload size by 50–90% and avoiding Rancher's nginx reverse-proxy body-size limit (~10 GB).
 
-**Recommended: convert to qcow2 before uploading.** qcow2 only stores allocated blocks, so the file size matches the actual data. Harvester/KubeVirt supports qcow2 natively:
+**Recommended: convert to qcow2 before uploading.** Harvester/KubeVirt supports qcow2 natively:
 
 ```sh
 qemu-img convert -f raw -O qcow2 image.raw image.qcow2
 ```
 
-Alternatively, convert to a dense raw file:
+Alternatively, convert to a dense raw file (no zero-block compression, but no sparse holes):
 
 ```sh
 qemu-img convert -f raw -O raw image.raw image-dense.raw

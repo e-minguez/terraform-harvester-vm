@@ -50,4 +50,10 @@ resource "harvester_virtualmachine" "vm" {
       error_message = "mac_addresses has ${length(var.mac_addresses)} entries but vm_count is ${var.vm_count}. Provide at most one MAC per VM."
     }
   }
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "5m"
+  }
 }

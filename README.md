@@ -279,6 +279,8 @@ module "vm" {
 | `mac_addresses` | `list(string)` | `[]` | MAC addresses for the NICs, one per VM (positional). Missing entries auto-assign. |
 | `efi` | `bool` | `true` | Boot with UEFI firmware. Set to `false` for legacy BIOS. |
 
+> **Timeouts:** `harvester_virtualmachine` uses `create = 10m` / `update = 10m` / `delete = 5m`. VM creation involves cloning the root disk from the image and waiting for a DHCP lease (`wait_for_lease = true`), which can take several minutes on a busy cluster.
+
 ## Outputs
 
 ### `image/` module

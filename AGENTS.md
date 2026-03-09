@@ -67,7 +67,7 @@ There are no automated tests beyond `terraform validate` / `tofu validate` and `
 
 `terraform_data.upload_image` is a `local-exec` provisioner that:
 1. Pre-computes file size with `stat` (not `wc -c`) **before** the polling loop begins. `wc -c` reads the entire file on macOS; for large images this burns seconds from CDI's countdown window.
-2. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until the `Initialized` CDI condition appears.
+2. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 1 s using a **single curl per iteration** — HTTP status is embedded via `-w '\nHTTPSTATUS:%{http_code}'` so no second round-trip is needed to fetch the body.
 3. Immediately streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` — zero delay between detecting `Initialized` and sending data.
 4. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
 
@@ -127,6 +127,8 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not replace the `curl` binary upload with an HTTP/REST provider.
 - Do not replace `stat` with `wc -c` for file size measurement in the upload heredoc — `wc -c` reads every byte of the file on macOS and burns CDI's countdown window between `Initialized` and the first data byte.
 - Do not move the `IMAGE_SIZE` computation into the polling loop or after it — it must run before polling so the upload starts with zero delay once CDI is ready.
+- Do not revert the polling loop back to two curl calls per iteration (one for HTTP code + one for body) — the single-curl approach with `-w '\nHTTPSTATUS:%{http_code}'` halves overhead and is intentional.
+- Do not increase the poll sleep back to 2 s — 1 s is intentional to minimise detection latency for the `Initialized` condition.
 - Do not remove or weaken `variable` validation blocks or `lifecycle.precondition` blocks — format and constraint validation lives in the Terraform modules.
 - Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
 - Do not modify `%%{http_code}` or `$${VAR}` escaping in the heredoc.

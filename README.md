@@ -332,7 +332,7 @@ Harvester's `VirtualMachineImage` CRD supports a two-step upload flow:
 1. **Create the CRD** — `harvester_image` with `source_type = "upload"` registers the image object and waits for it to reach `Active` state.
 2. **Stream the binary** — `terraform_data.upload_image` runs as a `local-exec` provisioner concurrently with step 1. It:
    - Pre-computes the file size with `stat` (not `wc -c` — see below) before the polling loop begins.
-   - Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until CDI's upload proxy reports `Initialized`.
+   - Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 1 s (single curl per iteration, HTTP status embedded in the response) until CDI's upload proxy reports `Initialized`.
    - Immediately streams the file via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` with zero additional delay.
 
 These two operations must run **concurrently**: the CRD must exist before the upload API accepts data, but the CRD only reaches `Active` after the binary is received. There is intentionally **no `depends_on`** between `harvester_image.upload` and `terraform_data.upload_image` — adding one would create a deadlock.
@@ -352,6 +352,18 @@ timeout waiting for the datasource file processing begin
 After enough failed attempts CDI marks the image `RetryLimitExceeded`, which is permanent — the image resource must be deleted before a new upload can be attempted.
 
 **Why `stat` instead of `wc -c`:** `wc -c < file` reads every byte of the file on macOS to count them. For a multi-GB image this can take tens of seconds, burning into CDI's countdown window between when `Initialized` is detected and when `curl` starts sending data. `stat` reads the file size from the inode in microseconds. The file size is also pre-computed before the polling loop so the upload starts with zero delay once CDI is ready.
+
+**Why a single curl per poll iteration:** the previous approach made two sequential requests per iteration (one for the HTTP status code, one for the body). Each is a full TLS handshake. Merging them into one call with `-w '\nHTTPSTATUS:%{http_code}'` halves the overhead; combined with a 1 s sleep (down from 2 s) this cuts the worst-case lag between CDI reporting `Initialized` and the upload starting.
+
+### Debug tracing
+
+To get a full `bash -x` trace of the upload script (useful for diagnosing timing or API issues), set `HARVESTER_UPLOAD_DEBUG=1` before running Terraform — `local-exec` inherits the parent environment automatically:
+
+```sh
+HARVESTER_UPLOAD_DEBUG=1 terraform -chdir=image apply -var-file=<your>.tfvars
+```
+
+The trace shows every curl invocation with resolved values, HTTP codes, and grep results at each poll iteration.
 
 ### Troubleshooting `RetryLimitExceeded`
 

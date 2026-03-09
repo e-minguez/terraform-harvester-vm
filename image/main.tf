@@ -130,6 +130,10 @@ resource "terraform_data" "upload_image" {
 
     command = <<-SHELL
       set -euo pipefail
+      # Set HARVESTER_UPLOAD_DEBUG=1 in the environment before running terraform
+      # to enable bash -x trace output for this upload script, e.g.:
+      #   HARVESTER_UPLOAD_DEBUG=1 terraform -chdir=image apply -var-file=...
+      [ "$${HARVESTER_UPLOAD_DEBUG:-}" = "1" ] && set -x
 
       # Pre-flight: verify curl is available.
       if ! command -v curl >/dev/null 2>&1; then

@@ -330,13 +330,58 @@ Then pass the patched file to `harvester-vm.sh` or the module:
 Harvester's `VirtualMachineImage` CRD supports a two-step upload flow:
 
 1. **Create the CRD** — `harvester_image` with `source_type = "upload"` registers the image object and waits for it to reach `Active` state.
-2. **Stream the binary** — `terraform_data.upload_image` runs as a `local-exec` provisioner, polls the API every 2 seconds until CDI's upload proxy reports `Initialized`, then streams the file via `curl -F "chunk=@<file>"`.
+2. **Stream the binary** — `terraform_data.upload_image` runs as a `local-exec` provisioner concurrently with step 1. It:
+   - Pre-computes the file size with `stat` (not `wc -c` — see below) before the polling loop begins.
+   - Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until CDI's upload proxy reports `Initialized`.
+   - Immediately streams the file via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` with zero additional delay.
 
 These two operations must run **concurrently**: the CRD must exist before the upload API accepts data, but the CRD only reaches `Active` after the binary is received. There is intentionally **no `depends_on`** between `harvester_image.upload` and `terraform_data.upload_image` — adding one would create a deadlock.
 
 Both `harvester-vm.sh` and direct `terraform`/`tofu apply` invocations follow exactly this path. The script is a pure wrapper that writes `.tfvars` files and calls `terraform apply` (or `tofu apply`); all upload logic lives inside the module.
 
 > **Note:** Upload mode requires a **bearer-token kubeconfig** (as downloaded from the Harvester UI). Client-certificate or exec-plugin kubeconfigs are not supported for upload; use `--image-source download` instead.
+
+### CDI timing sensitivity
+
+CDI starts an internal countdown once the image CRD is created. If no data begins flowing within ~2 minutes of CDI reporting `Initialized`, CDI fails the upload with:
+
+```
+timeout waiting for the datasource file processing begin
+```
+
+After enough failed attempts CDI marks the image `RetryLimitExceeded`, which is permanent — the image resource must be deleted before a new upload can be attempted.
+
+**Why `stat` instead of `wc -c`:** `wc -c < file` reads every byte of the file on macOS to count them. For a multi-GB image this can take tens of seconds, burning into CDI's countdown window between when `Initialized` is detected and when `curl` starts sending data. `stat` reads the file size from the inode in microseconds. The file size is also pre-computed before the polling loop so the upload starts with zero delay once CDI is ready.
+
+### Troubleshooting `RetryLimitExceeded`
+
+If `terraform apply` fails with this error, destroy the image and re-apply:
+
+```sh
+# Option A — via Terraform (recommended, keeps state clean)
+terraform -chdir=image destroy -var-file=<your>.tfvars
+terraform -chdir=image apply  -var-file=<your>.tfvars
+
+# Option B — manual delete + taint
+kubectl delete virtualmachineimage -n <namespace> <image-name>
+terraform -chdir=image taint 'harvester_image.upload[0]'
+terraform -chdir=image taint 'terraform_data.upload_image[0]'
+terraform -chdir=image apply -var-file=<your>.tfvars
+```
+
+To verify the API endpoint and image state before re-applying:
+
+```sh
+KUBECONFIG=~/path/to/harvester.yaml
+SERVER=$(kubectl --kubeconfig=$KUBECONFIG config view --minify -o jsonpath='{.clusters[0].cluster.server}' \
+  | sed 's/:6443//' | grep -oP '^https://[^/]+')
+TOKEN=$(kubectl --kubeconfig=$KUBECONFIG config view --minify --raw -o jsonpath='{.users[0].user.token}')
+
+# Check image state
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  "$SERVER/v1/harvester/harvesterhci.io.virtualmachineimages/<namespace>/<image-name>" \
+  | python3 -m json.tool | grep -E '"state"|RetryLimit|Initialized'
+```
 
 ### Sparse files and image format
 

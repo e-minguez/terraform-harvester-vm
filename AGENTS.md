@@ -66,9 +66,12 @@ There are no automated tests beyond `terraform validate` / `tofu validate` and `
 `harvester_image.upload` and `terraform_data.upload_image` run **concurrently** within a single `terraform apply` — there is intentionally **no `depends_on`** between them. Adding one creates a deadlock (each waits for the other to finish first).
 
 `terraform_data.upload_image` is a `local-exec` provisioner that:
-1. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until the `Initialized` CDI condition appears.
-2. Streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"`.
-3. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
+1. Pre-computes file size with `stat` (not `wc -c`) **before** the polling loop begins. `wc -c` reads the entire file on macOS; for large images this burns seconds from CDI's countdown window.
+2. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 2 s until the `Initialized` CDI condition appears.
+3. Immediately streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` — zero delay between detecting `Initialized` and sending data.
+4. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
+
+CDI starts an internal countdown once the CRD is created. If no data begins flowing within ~2 minutes of CDI reporting `Initialized`, CDI fails with `timeout waiting for the datasource file processing begin`. After exhausting retries the image is permanently marked `RetryLimitExceeded` and must be deleted before a new upload can be attempted.
 
 `harvester-vm.sh` is a pure Terraform/OpenTofu wrapper: it writes `.tfvars` files and calls `terraform apply` (or `tofu apply`). All upload logic lives inside the module. There is no separate shell-side upload.
 
@@ -122,6 +125,8 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not add `image_source` to the `vm/` module — the vm module always uses a data source lookup.
 - Do not remove or weaken `lifecycle.precondition` blocks.
 - Do not replace the `curl` binary upload with an HTTP/REST provider.
+- Do not replace `stat` with `wc -c` for file size measurement in the upload heredoc — `wc -c` reads every byte of the file on macOS and burns CDI's countdown window between `Initialized` and the first data byte.
+- Do not move the `IMAGE_SIZE` computation into the polling loop or after it — it must run before polling so the upload starts with zero delay once CDI is ready.
 - Do not remove or weaken `variable` validation blocks or `lifecycle.precondition` blocks — format and constraint validation lives in the Terraform modules.
 - Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
 - Do not modify `%%{http_code}` or `$${VAR}` escaping in the heredoc.

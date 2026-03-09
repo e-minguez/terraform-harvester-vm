@@ -137,6 +137,11 @@ resource "terraform_data" "upload_image" {
         exit 1
       fi
 
+      # Pre-compute file size before the polling loop so the upload can start
+      # immediately once CDI is ready. Prefer stat (no file read) over wc -c
+      # (wc -c reads the entire file on macOS, burning seconds of CDI's timeout).
+      IMAGE_SIZE=$(stat -c%s "$${IMAGE_PATH}" 2>/dev/null || stat -f%z "$${IMAGE_PATH}")
+
       # Harvester's upload action lives at /v1/harvester/{type}/{ns}/{name}?action=upload
       # (Harvester's own Steve router, pkg/server/router.go), NOT /v1/{type}/... which
       # is Rancher's Steve and does not have Harvester's custom action handlers.
@@ -191,21 +196,12 @@ resource "terraform_data" "upload_image" {
         sleep 2
       done
 
-      # Re-check: the image may have become Active while CDI was initialising
-      # (e.g. an external upload already completed). Skip if so.
-      FINAL_RESP=$(curl -sk \
-        -H "Authorization: Bearer $${TOKEN}" \
-        "$${SERVER}/$${API_PATH}" || true)
-      if echo "$${FINAL_RESP}" | grep -q '"state":"Active"'; then
-        echo "==> Image is already Active -- skipping upload."
-        exit 0
-      fi
-
-      echo "==> Uploading image file: $${IMAGE_PATH}"
+      echo "==> Uploading image file: $${IMAGE_PATH} ($${IMAGE_SIZE} bytes)"
       # Longhorn's backing-image-manager requires:
       #   - ?size=<bytes> query parameter
       #   - multipart/form-data body with the file in field "chunk"
-      IMAGE_SIZE=$(wc -c < "$${IMAGE_PATH}" | tr -d ' ')
+      # IMAGE_SIZE was pre-computed before the polling loop to eliminate any
+      # delay between CDI becoming ready and the upload starting.
       CURL_EXIT=0
       HTTP_STATUS=$(curl -k --progress-bar -o /dev/null -w '%%{http_code}' \
         -X POST \

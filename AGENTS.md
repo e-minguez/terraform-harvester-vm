@@ -118,7 +118,7 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - **`--vm-namespace` is required** — no default is provided in `harvester-vm.sh` to prevent accidental deployments into the wrong namespace.
 - **`TF_CMD` / `--tofu`** — `harvester-vm.sh` auto-detects the binary: prefers `terraform` if found in `PATH`, falls back to `tofu`. Users can override with `TF_CMD=tofu` env var or the `--tofu` flag. All `terraform -chdir=` calls in the script use `$TF_CMD`.
 - **`efi` boot** — `vm/variables.tf` has `efi` (bool, default `true`). `harvester-vm.sh` maps `--boot uefi` → `efi = true` and `--boot bios` → `efi = false`.
-- **`harvester_virtualmachine` timeouts** — `create = 10m`, `update = 10m`, `delete = 5m`. The default provider timeout (2 min) is not enough: VM creation involves cloning the root disk from the image and waiting for a DHCP lease (`wait_for_lease = true`).
+- **`harvester-vm.sh` pre-flight validation** — `--cpu`, `--memory`, and `--disk-size` are validated before any Terraform call, mirroring `vm/variables.tf` rules (`cpu >= 1`; memory/disk match `^[0-9]+(Mi|Gi)$`). This produces a clear error message and exits before touching any state.
 - **Image format/size warnings in `harvester-vm.sh`** — before handing off to Terraform, the script checks the image file and prints warnings to stderr for: (1) raw format (detected via `qemu-img info` if available, else extension), (2) sparse file (logical > 5× physical), (3) large file (> 2 GiB). All three recommend `qemu-img convert -O qcow2`. These checks run only for `upload` mode during `apply`.
 - **No cloud-init, no SSH keys** — out of scope for this module.
 
@@ -134,6 +134,7 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not revert the polling loop back to two curl calls per iteration (one for HTTP code + one for body) — the single-curl approach with `-w '\nHTTPSTATUS:%{http_code}'` halves overhead and is intentional.
 - Do not increase the poll sleep back to 2 s — 1 s is intentional to minimise detection latency for the `Initialized` condition.
 - Do not remove or weaken `variable` validation blocks or `lifecycle.precondition` blocks — format and constraint validation lives in the Terraform modules.
+- Do not remove the `--cpu` / `--memory` / `--disk-size` pre-flight checks in `harvester-vm.sh` — they mirror `vm/variables.tf` and must stay in sync with it so the script fails fast before touching any state.
 - Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
 - Do not modify `%%{http_code}` or `$${VAR}` escaping in the heredoc.
 - Do not default `--vm-namespace` in `harvester-vm.sh` — it is intentionally required to prevent accidental deployment into the wrong namespace.

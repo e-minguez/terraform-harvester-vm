@@ -138,9 +138,9 @@ Run `./harvester-vm.sh --help` for all options.
 | `--image-namespace` | `harvester-public` | Namespace for the image |
 | `--image-display-name` | same as `--image-name` | Human-readable image label *(upload/download modes)* |
 | `--network-namespace` | `default` | Namespace of the network |
-| `--cpu` | `2` | Number of vCPUs |
-| `--memory` | `4Gi` | RAM (e.g. `4Gi`, `2048Mi`) |
-| `--disk-size` | `40Gi` | Root disk size (e.g. `40Gi`) |
+| `--cpu` | `2` | Number of vCPUs (must be ≥ 1) |
+| `--memory` | `4Gi` | RAM — must match `^[0-9]+(Mi\|Gi)$` (e.g. `4Gi`, `2048Mi`) |
+| `--disk-size` | `40Gi` | Root disk size — must match `^[0-9]+(Mi\|Gi)$` (e.g. `40Gi`, `100Gi`) |
 | `--count` | `1` | Number of VMs to create. Names are suffixed with the index when > 1 (e.g. `my-vm-0`, `my-vm-1`) |
 | `--mac-address` | — | MAC address(es), comma-separated (e.g. `AA:BB:CC:DD:EE:FF` or `AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02`). Positionally matched to VMs; missing entries auto-assign |
 | `--boot` | `uefi` | Boot firmware: `uefi` (default) or `bios` |

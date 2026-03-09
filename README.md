@@ -353,6 +353,8 @@ After enough failed attempts CDI marks the image `RetryLimitExceeded`, which is 
 
 **Why `stat` instead of `wc -c`:** `wc -c < file` reads every byte of the file on macOS to count them. For a multi-GB image this can take tens of seconds, burning into CDI's countdown window between when `Initialized` is detected and when `curl` starts sending data. `stat` reads the file size from the inode in microseconds. The file size is also pre-computed before the polling loop so the upload starts with zero delay once CDI is ready.
 
+**Why the path, not `filemd5()`, in `triggers_replace`:** `filemd5()` reads the entire image file at apply time when Terraform evaluates `triggers_replace`. For a multi-GB image this blocks `terraform_data.upload_image` from starting for minutes — by which point CDI's countdown has nearly expired and the upload fails immediately. `triggers_replace` uses `var.local_image_path` (the path string) instead. If you replace the file at the same path without changing the path, taint the resource manually: `terraform taint 'terraform_data.upload_image[0]'`.
+
 **Why a single curl per poll iteration:** the previous approach made two sequential requests per iteration (one for the HTTP status code, one for the body). Each is a full TLS handshake. Merging them into one call with `-w '\nHTTPSTATUS:%{http_code}'` halves the overhead; combined with a 1 s sleep (down from 2 s) this cuts the worst-case lag between CDI reporting `Initialized` and the upload starting.
 
 ### Debug tracing

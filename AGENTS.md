@@ -91,12 +91,14 @@ Inside `<<-SHELL` heredocs, Terraform template directives are active:
 
 Breaking this escaping will cause `terraform validate` / `tofu validate` to fail with `invalid template control keyword`.
 
-### `filemd5()` guard
-`filemd5(var.local_image_path)` is evaluated at plan time. It must be wrapped in a ternary:
-```hcl
-var.local_image_path != "" ? filemd5(var.local_image_path) : ""
+### `filemd5()` must not be used in `triggers_replace`
+
+`filemd5(var.local_image_path)` reads the **entire image file** at apply time when Terraform evaluates `triggers_replace`. For a multi-GB image this blocks `terraform_data.upload_image` from starting for minutes — by which point CDI's countdown has nearly expired and the upload fails with `timeout waiting for the datasource file processing begin`.
+
+`triggers_replace` uses `var.local_image_path` (the path string) instead. If the image file is replaced at the same path, taint the resource manually:
+```sh
+terraform taint 'terraform_data.upload_image[0]'
 ```
-Never call it unconditionally.
 
 ### Plan-time validation
 Use `lifecycle.precondition` for cross-variable checks that `variable` validation blocks cannot express (e.g. "field X is required when field Y equals Z"). Preconditions must only reference Terraform-known values — not shell commands or runtime state.
@@ -125,7 +127,7 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not add `image_source` to the `vm/` module — the vm module always uses a data source lookup.
 - Do not remove or weaken `lifecycle.precondition` blocks.
 - Do not replace the `curl` binary upload with an HTTP/REST provider.
-- Do not replace `stat` with `wc -c` for file size measurement in the upload heredoc — `wc -c` reads every byte of the file on macOS and burns CDI's countdown window between `Initialized` and the first data byte.
+- Do not use `filemd5()` in `triggers_replace` for `terraform_data.upload_image` — it reads the entire image file at apply time and blocks the resource from starting, causing CDI to time out before the upload begins.
 - Do not move the `IMAGE_SIZE` computation into the polling loop or after it — it must run before polling so the upload starts with zero delay once CDI is ready.
 - Do not revert the polling loop back to two curl calls per iteration (one for HTTP code + one for body) — the single-curl approach with `-w '\nHTTPSTATUS:%{http_code}'` halves overhead and is intentional.
 - Do not increase the poll sleep back to 2 s — 1 s is intentional to minimise detection latency for the `Initialized` condition.

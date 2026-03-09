@@ -111,8 +111,14 @@ resource "terraform_data" "upload_image" {
     }
   }
 
+  # triggers_replace intentionally uses the file PATH, not filemd5().
+  # filemd5() reads the entire image file at apply time; for a multi-GB image
+  # this blocks terraform_data from starting for minutes — by which point CDI's
+  # countdown has nearly expired and the upload fails immediately.
+  # If you replace the file at the same path, taint this resource manually:
+  #   terraform taint 'terraform_data.upload_image[0]'
   triggers_replace = [
-    var.local_image_path != "" ? filemd5(var.local_image_path) : "",
+    var.local_image_path,
     var.image_name,
     var.image_namespace,
   ]
@@ -133,7 +139,12 @@ resource "terraform_data" "upload_image" {
       # Set HARVESTER_UPLOAD_DEBUG=1 in the environment before running terraform
       # to enable bash -x trace output for this upload script, e.g.:
       #   HARVESTER_UPLOAD_DEBUG=1 terraform -chdir=image apply -var-file=...
-      [ "$${HARVESTER_UPLOAD_DEBUG:-}" = "1" ] && set -x
+      # stdout is redirected to stderr so all output is line-buffered and
+      # visible in real time (bash block-buffers stdout when not on a TTY).
+      if [ "$${HARVESTER_UPLOAD_DEBUG:-}" = "1" ]; then
+        set -x
+        exec 1>&2
+      fi
 
       # Pre-flight: verify curl is available.
       if ! command -v curl >/dev/null 2>&1; then

@@ -148,27 +148,27 @@ resource "terraform_data" "upload_image" {
       API_PATH="v1/harvester/harvesterhci.io.virtualmachineimages/$${NAMESPACE}/$${IMAGE_NAME}"
 
       # Poll until the CRD exists AND CDI upload proxy is initialised.
-      # We poll every 2 s (not 5 s) to minimise the gap between CDI becoming
-      # ready and the upload starting — CDI times out after ~1 minute if no
-      # data arrives.
+      # One curl per iteration (fetches body + HTTP code in a single request)
+      # avoids the double TLS round-trip of the previous two-curl approach and
+      # halves the sleep interval — together this minimises the gap between CDI
+      # becoming ready and the upload starting.
       echo "==> Waiting for VirtualMachineImage CRD and CDI upload proxy to be ready..."
-      MAX_WAIT=150   # 150 × 2 s = 5 minutes
+      MAX_WAIT=300   # 300 × 1 s = 5 minutes
       i=0
       while true; do
         if [ "$${i}" -ge "$${MAX_WAIT}" ]; then
-          echo "ERROR: Timed out waiting for image to become upload-ready after $((MAX_WAIT * 2))s." >&2
+          echo "ERROR: Timed out waiting for image to become upload-ready after $${MAX_WAIT}s." >&2
           exit 1
         fi
 
-        HTTP_CODE=$(curl -sk -o /dev/null -w '%%{http_code}' \
+        # Single curl: body followed by a sentinel last line "HTTPSTATUS:<code>".
+        RESP_RAW=$(curl -sk -w '\nHTTPSTATUS:%%{http_code}' \
           -H "Authorization: Bearer $${TOKEN}" \
           "$${SERVER}/$${API_PATH}" || true)
+        HTTP_CODE=$(echo "$${RESP_RAW}" | grep '^HTTPSTATUS:' | cut -c12-)
+        RESP=$(echo "$${RESP_RAW}" | grep -v '^HTTPSTATUS:')
 
         if [ "$${HTTP_CODE}" = "200" ]; then
-          RESP=$(curl -sk \
-            -H "Authorization: Bearer $${TOKEN}" \
-            "$${SERVER}/$${API_PATH}" || true)
-
           # Detect CDI retry exhaustion — image must be deleted before we can retry.
           if echo "$${RESP}" | grep -q 'RetryLimitExceeded'; then
             echo "ERROR: The image is in a failed state (RetryLimitExceeded)." >&2
@@ -193,7 +193,7 @@ resource "terraform_data" "upload_image" {
         fi
 
         i=$((i + 1))
-        sleep 2
+        sleep 1
       done
 
       echo "==> Uploading image file: $${IMAGE_PATH} ($${IMAGE_SIZE} bytes)"

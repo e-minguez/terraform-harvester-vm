@@ -252,6 +252,12 @@ ERRORS=()
 [[ -n "$VM_NAMESPACE" ]]    || ERRORS+=("--vm-namespace is required.")
 [[ -n "$NETWORK_NAME" ]]    || ERRORS+=("--network is required.")
 
+# Validate resource sizing — mirror the regex used by vm/variables.tf so the
+# script fails fast with a clear message rather than letting Terraform catch it.
+[[ "$CPU" =~ ^[1-9][0-9]*$ ]]            || ERRORS+=("--cpu must be a positive integer, got: '$CPU'")
+[[ "$MEMORY"    =~ ^[0-9]+(Mi|Gi)$ ]]    || ERRORS+=("--memory must be a value like '4Gi' or '2048Mi', got: '$MEMORY'")
+[[ "$DISK_SIZE" =~ ^[0-9]+(Mi|Gi)$ ]]    || ERRORS+=("--disk-size must be a value like '40Gi' or '100Gi', got: '$DISK_SIZE'")
+
 case "$IMAGE_SOURCE" in
   upload)
     [[ -n "$IMAGE_FILE" ]] || ERRORS+=("An image file path is required for 'upload' mode.")

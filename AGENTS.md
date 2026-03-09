@@ -34,9 +34,13 @@ The two modules have **separate state files** and are applied independently. Des
 Always run these after editing any `.tf` file:
 
 ```sh
-# Modules
+# Modules (use tofu or terraform interchangeably)
 terraform -chdir=image validate
 terraform -chdir=vm validate
+
+# Same with OpenTofu
+tofu -chdir=image validate
+tofu -chdir=vm validate
 
 # Examples
 terraform -chdir=examples/local-image validate
@@ -50,7 +54,7 @@ For `harvester-vm.sh`, check syntax with:
 bash -n harvester-vm.sh
 ```
 
-There are no automated tests beyond `terraform validate` and `bash -n`. Do not add new testing frameworks.
+There are no automated tests beyond `terraform validate` / `tofu validate` and `bash -n`. Do not add new testing frameworks.
 
 ## Key design decisions
 
@@ -66,7 +70,7 @@ There are no automated tests beyond `terraform validate` and `bash -n`. Do not a
 2. Streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"`.
 3. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
 
-`harvester-vm.sh` is a pure Terraform wrapper: it writes `.tfvars` files and calls `terraform apply`. All upload logic lives inside the module. There is no separate shell-side upload.
+`harvester-vm.sh` is a pure Terraform/OpenTofu wrapper: it writes `.tfvars` files and calls `terraform apply` (or `tofu apply`). All upload logic lives inside the module. There is no separate shell-side upload.
 
 ### vm/ always uses a data source
 The `vm/` module never manages image lifecycle. It always looks up the image via `data "harvester_image" "image"`. There is no `image_source` variable in `vm/`.
@@ -82,7 +86,7 @@ Inside `<<-SHELL` heredocs, Terraform template directives are active:
 - Shell variables must be written as `$${VAR}` (double `$`)
 - `curl` format strings must be written as `%%{http_code}` (double `%`)
 
-Breaking this escaping will cause `terraform validate` to fail with `invalid template control keyword`.
+Breaking this escaping will cause `terraform validate` / `tofu validate` to fail with `invalid template control keyword`.
 
 ### `filemd5()` guard
 `filemd5(var.local_image_path)` is evaluated at plan time. It must be wrapped in a ternary:
@@ -96,7 +100,8 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 
 ## Conventions
 
-- **Terraform version** — `>= 1.4` minimum (required for the built-in `terraform_data` resource).
+- **Terraform / OpenTofu version** — `>= 1.4` minimum (required for the built-in `terraform_data` resource). Both Terraform and OpenTofu are supported; the modules are compatible with both tools.
+- **Provider source** — always use the fully-qualified source `registry.terraform.io/harvester/harvester` in `versions.tf`. OpenTofu expands the bare shorthand `harvester/harvester` to `registry.opentofu.org/harvester/harvester`, which does not host this provider. The explicit path works correctly with both tools.
 - **Resource naming** — all Kubernetes resource names must be lowercase alphanumeric + hyphens. Validated by `variable` validation blocks in both `image/variables.tf` and `vm/variables.tf` (regex `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`). `sanitize_k8s_name()` in `harvester-vm.sh` auto-derives a valid name from the image filename.
 - **`image/` image_source** — only `"upload"` and `"download"` are valid. `"existing"` is not a valid value for the `image/` module; when the image already exists, skip the `image/` module entirely.
 - **`vm/` has no image_source** — the `vm/` module always looks up the image by name via a data source. Do not add an `image_source` variable to `vm/`.
@@ -106,6 +111,7 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - **Network reference format** — `"${namespace}/${name}"`, e.g. `"default/vlan10"`.
 - **harvester-vm.sh destroy flags** — `--destroy-vm` (VM only), `--destroy-image` (image only), `--destroy-all` (VM first, then image). Default (no destroy flag) = apply both modules.
 - **`--vm-namespace` is required** — no default is provided in `harvester-vm.sh` to prevent accidental deployments into the wrong namespace.
+- **`TF_CMD` / `--tofu`** — `harvester-vm.sh` auto-detects the binary: prefers `terraform` if found in `PATH`, falls back to `tofu`. Users can override with `TF_CMD=tofu` env var or the `--tofu` flag. All `terraform -chdir=` calls in the script use `$TF_CMD`.
 - **`efi` boot** — `vm/variables.tf` has `efi` (bool, default `true`). `harvester-vm.sh` maps `--boot uefi` → `efi = true` and `--boot bios` → `efi = false`.
 - **No cloud-init, no SSH keys** — out of scope for this module.
 
@@ -120,7 +126,8 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
 - Do not modify `%%{http_code}` or `$${VAR}` escaping in the heredoc.
 - Do not default `--vm-namespace` in `harvester-vm.sh` — it is intentionally required to prevent accidental deployment into the wrong namespace.
-- Do not change the `harvester-vm.sh` tfvars mechanism to use individual `-var` flags — the generated `.tfvars` files are intentionally kept on disk for plain `terraform destroy -var-file=...` usage.
+- Do not change the `harvester-vm.sh` tfvars mechanism to use individual `-var` flags — the generated `.tfvars` files are intentionally kept on disk for plain `terraform destroy -var-file=...` / `tofu destroy -var-file=...` usage.
 - Do not add new providers beyond `harvester/harvester` without a clear reason.
+- Do not shorten the provider source `registry.terraform.io/harvester/harvester` back to `harvester/harvester` — the bare shorthand breaks OpenTofu, which resolves it to `registry.opentofu.org/harvester/harvester`.
 - Do not flatten `vm_names`/`vm_ids` outputs back to singular values — they are always lists to support `vm_count > 1`.
 - Do not replace `mac_addresses` (list) with a single `mac_address` string — the list design supports per-VM MAC assignment with `count`.

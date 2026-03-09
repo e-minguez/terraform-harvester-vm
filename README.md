@@ -2,7 +2,7 @@
 
 ![SUSE Geeko managing virtual machines with Harvester HCI and Terraform](assets/geeko-harvester.png)
 
-Provisions one or more virtual machines on [SUSE Harvester HCI](https://harvesterhci.io/) using two independent Terraform root modules:
+Provisions one or more virtual machines on [SUSE Harvester HCI](https://harvesterhci.io/) using two independent [Terraform](https://developer.hashicorp.com/terraform) / [OpenTofu](https://opentofu.org/) root modules:
 
 | Module | Purpose |
 |---|---|
@@ -21,13 +21,13 @@ The modules have **separate state files**. Running `terraform destroy` on the `v
 - **Kubeconfig-only auth** — server URL and bearer token are extracted from your kubeconfig with `yamldecode()`; no `kubectl` or external tools required
 - **UEFI boot** — VMs use UEFI firmware by default; pass `--boot bios` (script) or `efi = false` (module) for legacy BIOS
 - **Input validation** — `variable` validation blocks and `lifecycle.precondition` blocks catch misconfigurations before infrastructure is touched
-- **Companion shell script** — `harvester-vm.sh` wraps both modules; derives names, checks paths, then delegates entirely to `terraform apply`
+- **Companion shell script** — `harvester-vm.sh` wraps both modules; derives names, checks paths, then delegates entirely to `terraform`/`tofu`. Supports both tools via auto-detection or the `--tofu` flag / `TF_CMD` env var
 
 ## Requirements
 
 | Tool | Minimum version |
 |---|---|
-| [Terraform](https://developer.hashicorp.com/terraform/downloads) | 1.4 |
+| [Terraform](https://developer.hashicorp.com/terraform/downloads) **or** [OpenTofu](https://opentofu.org/docs/intro/install/) | 1.4 |
 | [harvester/harvester provider](https://registry.terraform.io/providers/harvester/harvester) | 0.6.4 |
 | `curl` | any (required for `image_source = "upload"` only) |
 
@@ -153,12 +153,17 @@ Run `./harvester-vm.sh --help` for all options.
 | `--vm-dir` | `<script-dir>/vm` | Path to the VM Terraform module |
 | `--image-tfvars-file` | `<image-dir>/<image-name>-<image-ns>.tfvars` | Path for the image module `.tfvars` file |
 | `--vm-tfvars-file` | `<vm-dir>/<vm-name>-<vm-ns>.tfvars` | Path for the VM module `.tfvars` file |
+| `--tofu` | — | Use `tofu` instead of `terraform`. Equivalent to `TF_CMD=tofu` |
 
-Each run writes a `.tfvars` file per module. These are left on disk so you can run `terraform destroy` directly:
+The script auto-detects which binary to use: it prefers `terraform` if found in `PATH`, then falls back to `tofu`. Override with `--tofu` or `TF_CMD=tofu ./harvester-vm.sh ...`.
+
+Each run writes a `.tfvars` file per module. These are left on disk so you can run `terraform`/`tofu` destroy directly:
 
 ```sh
 # Destroy only the VM
 terraform -chdir=vm destroy -var-file=my-vm-default.tfvars
+# or with OpenTofu:
+tofu -chdir=vm destroy -var-file=my-vm-default.tfvars
 
 # Destroy only the image
 terraform -chdir=image destroy -var-file=image-74wx4-harvester-public.tfvars
@@ -329,7 +334,7 @@ Harvester's `VirtualMachineImage` CRD supports a two-step upload flow:
 
 These two operations must run **concurrently**: the CRD must exist before the upload API accepts data, but the CRD only reaches `Active` after the binary is received. There is intentionally **no `depends_on`** between `harvester_image.upload` and `terraform_data.upload_image` — adding one would create a deadlock.
 
-Both `harvester-vm.sh` and direct `terraform apply` invocations follow exactly this path. The script is a pure wrapper that writes `.tfvars` files and calls `terraform apply`; all upload logic lives inside the Terraform module.
+Both `harvester-vm.sh` and direct `terraform`/`tofu apply` invocations follow exactly this path. The script is a pure wrapper that writes `.tfvars` files and calls `terraform apply` (or `tofu apply`); all upload logic lives inside the module.
 
 > **Note:** Upload mode requires a **bearer-token kubeconfig** (as downloaded from the Harvester UI). Client-certificate or exec-plugin kubeconfigs are not supported for upload; use `--image-source download` instead.
 

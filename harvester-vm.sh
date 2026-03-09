@@ -37,6 +37,7 @@ DESTROY_ALL=false       # destroy both VM and image modules
 SKIP_IMAGE=false        # skip image module; image must already exist
 IMAGE_ONLY=false        # only manage image; skip VM module
 IMAGE_FILE=""
+TF_CMD="${TF_CMD:-}"    # terraform binary: auto-detected if unset (terraform → tofu)
 
 # ──────────────────────────────────────────────
 # Helpers
@@ -104,6 +105,8 @@ OPTIONAL:
                                   (default: <image-dir>/<image-name>-<image-ns>.tfvars)
       --vm-tfvars-file <path>     Path for the VM module .tfvars file.
                                   (default: <vm-dir>/<vm-name>-<vm-ns>.tfvars)
+      --tofu                      Use 'tofu' instead of 'terraform'.
+                                  Equivalent to: TF_CMD=tofu
   -h, --help                      Show this help message.
 
 EXAMPLES:
@@ -186,6 +189,7 @@ while [[ $# -gt 0 ]]; do
     --vm-dir)                VM_TF_DIR="$2"; shift 2 ;;
     --image-tfvars-file)     IMAGE_TFVARS_FILE="$2"; shift 2 ;;
     --vm-tfvars-file)        VM_TFVARS_FILE="$2"; shift 2 ;;
+    --tofu)                  TF_CMD=tofu; shift ;;
     --)                      shift; break ;;
     -*)                      die "Unknown option: $1. Run with --help for usage." ;;
     *)
@@ -206,7 +210,16 @@ VM_TF_DIR="${VM_TF_DIR:-$SCRIPT_DIR/vm}"
 # ──────────────────────────────────────────────
 # Prerequisite binaries
 # ──────────────────────────────────────────────
-require_cmd terraform
+if [[ -z "$TF_CMD" ]]; then
+  if command -v terraform >/dev/null 2>&1; then
+    TF_CMD=terraform
+  elif command -v tofu >/dev/null 2>&1; then
+    TF_CMD=tofu
+  else
+    die "Neither 'terraform' nor 'tofu' found in PATH. Install one or set TF_CMD."
+  fi
+fi
+require_cmd "$TF_CMD"
 
 # ──────────────────────────────────────────────
 # Auto-detect image source if not explicitly set
@@ -319,18 +332,18 @@ echo ""
 # ──────────────────────────────────────────────
 tf_apply() {
   local module_dir="$1" tfvars="$2"
-  info "[$module_dir] terraform init"
-  terraform -chdir="$module_dir" init -upgrade -input=false
-  info "[$module_dir] terraform apply"
-  terraform -chdir="$module_dir" apply -auto-approve -input=false -var-file="$tfvars"
+  info "[$module_dir] $TF_CMD init"
+  "$TF_CMD" -chdir="$module_dir" init -upgrade -input=false
+  info "[$module_dir] $TF_CMD apply"
+  "$TF_CMD" -chdir="$module_dir" apply -auto-approve -input=false -var-file="$tfvars"
 }
 
 tf_destroy() {
   local module_dir="$1" tfvars="$2"
-  info "[$module_dir] terraform init"
-  terraform -chdir="$module_dir" init -upgrade -input=false
-  info "[$module_dir] terraform destroy"
-  terraform -chdir="$module_dir" destroy -auto-approve -input=false -var-file="$tfvars"
+  info "[$module_dir] $TF_CMD init"
+  "$TF_CMD" -chdir="$module_dir" init -upgrade -input=false
+  info "[$module_dir] $TF_CMD destroy"
+  "$TF_CMD" -chdir="$module_dir" destroy -auto-approve -input=false -var-file="$tfvars"
 }
 
 # ──────────────────────────────────────────────

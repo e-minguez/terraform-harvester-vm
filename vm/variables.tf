@@ -125,3 +125,9 @@ variable "efi" {
   description = "Boot the VM with UEFI firmware. Set to false for legacy BIOS."
   default     = true
 }
+
+variable "storage_class_name" {
+  type        = string
+  description = "Storage class to use for the root disk. If not set, uses the cluster default."
+  default     = ""
+}

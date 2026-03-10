@@ -208,15 +208,17 @@ resource "terraform_data" "upload_image" {
             exit 0
           fi
 
-          # CDI upload proxy is ready once Initialized condition has status True.
-          # Harvester sets Initialized=False first (CRD created but proxy not yet ready),
-          # then transitions to Initialized=True once the upload endpoint is available.
-          # Matching only '"Initialized"' fires prematurely on the False state and sends
-          # the upload curl before CDI is ready; we must check status=True explicitly.
-          # Steve API serialises condition objects with alphabetical keys (compact JSON):
-          #   {"lastUpdateTime":"...","message":"","reason":"","status":"True","type":"Initialized"}
-          # so "status":"True" always appears directly before "type":"Initialized".
-          if echo "$${RESP}" | grep -qE '"status"\s*:\s*"True"\s*,\s*"type"\s*:\s*"Initialized"'; then
+          # CDI upload proxy is ready once the Initialized condition has status True.
+          # Wrangler's GenericCondition struct marshals fields in declaration order:
+          #   type, status, lastUpdateTime, reason, message
+          # so the actual JSON is:
+          #   {"type":"Initialized","status":"True","lastUpdateTime":"...","reason":"Initialized"}
+          # i.e. "type" comes BEFORE "status", not after.
+          # We use an object-boundary pattern ([^{}]* stops at { or }) so the match
+          # cannot span across two separate condition objects in the array, making it
+          # safe regardless of the exact field order used by a given Harvester version.
+          if echo "$${RESP}" | grep -qE '"type"[[:space:]]*:[[:space:]]*"Initialized"[^{}]*"status"[[:space:]]*:[[:space:]]*"True"' || \
+             echo "$${RESP}" | grep -qE '"status"[[:space:]]*:[[:space:]]*"True"[^{}]*"type"[[:space:]]*:[[:space:]]*"Initialized"'; then
             echo "==> CDI upload proxy is ready."
             break
           fi

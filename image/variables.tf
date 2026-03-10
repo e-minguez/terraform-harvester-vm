@@ -65,3 +65,9 @@ variable "image_url" {
     error_message = "image_url must be a valid HTTP or HTTPS URL, or left empty."
   }
 }
+
+variable "storage_class_name" {
+  type        = string
+  description = "Storage class to use for the image. If not set, uses the cluster default."
+  default     = ""
+}

@@ -25,6 +25,7 @@ CPU=2
 MEMORY="4Gi"
 DISK_SIZE="40Gi"
 STORAGE_CLASS=""
+IMAGE_STORAGE_CLASS=""
 VM_COUNT=1
 MAC_ADDRESS=""
 EFI=true
@@ -82,6 +83,7 @@ OPTIONAL:
       --image-namespace <ns>      Namespace for the image.       (default: harvester-public)
       --image-display-name <txt>  Human-readable image label.   (default: same as --image-name)
                                   Not used in 'existing' mode.
+      --image-storage-class <nm>  Storage class for the image.  If not set, uses cluster default.
       --network-namespace <ns>    Namespace of the network.     (default: default)
       --cpu <n>                   vCPU count.                   (default: 2)
       --memory <size>             RAM, e.g. 4Gi or 2048Mi.      (default: 4Gi)
@@ -168,6 +170,7 @@ while [[ $# -gt 0 ]]; do
     --image-name)            IMAGE_NAME="$2"; shift 2 ;;
     --image-namespace)       IMAGE_NAMESPACE="$2"; shift 2 ;;
     --image-display-name)    IMAGE_DISPLAY_NAME="$2"; shift 2 ;;
+    --image-storage-class)   IMAGE_STORAGE_CLASS="$2"; shift 2 ;;
     --network)               NETWORK_NAME="$2"; shift 2 ;;
     --network-namespace)     NETWORK_NAMESPACE="$2"; shift 2 ;;
     --cpu)                   CPU="$2"; shift 2 ;;
@@ -369,6 +372,7 @@ image_source       = "${IMAGE_SOURCE}"
 image_name         = "${IMAGE_NAME}"
 image_namespace    = "${IMAGE_NAMESPACE}"
 image_display_name = "${IMAGE_DISPLAY_NAME}"
+storage_class_name = "${IMAGE_STORAGE_CLASS}"
 TFVARS
 
   case "$IMAGE_SOURCE" in

@@ -93,7 +93,7 @@ The modules have **separate state files**. Running `terraform destroy` on the `v
   --boot bios \
   ./my-image.qcow2
 
-# Create a VM with a specific storage class
+# Create a VM with a specific storage class for the root disk
 ./harvester-vm.sh \
   -k ~/.kube/harvester.yaml \
   -n my-vm \
@@ -102,6 +102,16 @@ The modules have **separate state files**. Running `terraform destroy` on the `v
   --image-source existing \
   --image-name image-74wx4 \
   --storage-class longhorn-fast
+
+# Upload an image with a specific storage class
+./harvester-vm.sh \
+  -k ~/.kube/harvester.yaml \
+  -n my-vm \
+  --vm-namespace default \
+  --network vlan10 \
+  --image-storage-class longhorn-fast \
+  --storage-class longhorn-fast \
+  ./my-image.qcow2
 
 # Destroy only the VM (image is preserved)
 ./harvester-vm.sh \
@@ -147,6 +157,7 @@ Run `./harvester-vm.sh --help` for all options.
 | `--image-url` | — | HTTP/HTTPS URL *(download mode)* |
 | `--image-namespace` | `harvester-public` | Namespace for the image |
 | `--image-display-name` | same as `--image-name` | Human-readable image label *(upload/download modes)* |
+| `--image-storage-class` | — | Storage class for the image. If not set, uses the cluster default |
 | `--network-namespace` | `default` | Namespace of the network |
 | `--cpu` | `2` | Number of vCPUs (must be ≥ 1) |
 | `--memory` | `4Gi` | RAM — must match `^[0-9]+(Mi\|Gi)$` (e.g. `4Gi`, `2048Mi`) |
@@ -195,6 +206,9 @@ module "image" {
   image_name         = "opensuse-leap-156"
   image_namespace    = "harvester-public"
   image_display_name = "openSUSE Leap 15.6"
+
+  # Optional: specify storage class
+  # storage_class_name = "longhorn-fast"
 }
 
 # Step 2 — vm/
@@ -228,6 +242,9 @@ module "image" {
   image_name         = "opensuse-leap-156"
   image_namespace    = "harvester-public"
   image_display_name = "openSUSE Leap 15.6"
+
+  # Optional: specify storage class
+  # storage_class_name = "longhorn-fast"
 }
 ```
 
@@ -275,6 +292,7 @@ module "vm" {
 | `image_name` | `string` | — | Kubernetes resource name for the image |
 | `image_namespace` | `string` | `"harvester-public"` | Namespace for the image |
 | `image_display_name` | `string` | `""` | Human-readable label (defaults to `image_name`) |
+| `storage_class_name` | `string` | `""` | Storage class for the image. If not set, uses the cluster default |
 | `local_image_path` | `string` | `""` | Absolute path to local image file *(upload only)* |
 | `image_url` | `string` | `""` | HTTP/HTTPS URL to pull from *(download only)* |
 

@@ -41,11 +41,12 @@ resource "harvester_image" "download" {
     }
   }
 
-  name         = var.image_name
-  namespace    = var.image_namespace
-  display_name = var.image_display_name
-  source_type  = "download"
-  url          = var.image_url
+  name               = var.image_name
+  namespace          = var.image_namespace
+  display_name       = var.image_display_name
+  source_type        = "download"
+  url                = var.image_url
+  storage_class_name = var.storage_class_name != "" ? var.storage_class_name : null
 
   timeouts {
     create = "30m"
@@ -69,10 +70,11 @@ resource "harvester_image" "upload" {
     }
   }
 
-  name         = var.image_name
-  namespace    = var.image_namespace
-  display_name = var.image_display_name
-  source_type  = "upload"
+  name               = var.image_name
+  namespace          = var.image_namespace
+  display_name       = var.image_display_name
+  source_type        = "upload"
+  storage_class_name = var.storage_class_name != "" ? var.storage_class_name : null
 
   timeouts {
     create = "60m"

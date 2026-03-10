@@ -40,9 +40,8 @@ resource "harvester_virtualmachine" "vm" {
     size               = var.disk_size
     bus                = "virtio"
     boot_order         = 1
-    image              = data.harvester_image.image.id
-    auto_delete        = true
-    storage_class_name = var.storage_class_name != "" ? var.storage_class_name : null
+    image       = data.harvester_image.image.id
+    auto_delete = true
   }
 
   lifecycle {

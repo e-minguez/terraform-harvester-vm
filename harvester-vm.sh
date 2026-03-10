@@ -24,7 +24,6 @@ NETWORK_NAMESPACE="default"
 CPU=2
 MEMORY="4Gi"
 DISK_SIZE="40Gi"
-STORAGE_CLASS=""
 IMAGE_STORAGE_CLASS=""
 VM_COUNT=1
 MAC_ADDRESS=""
@@ -88,7 +87,6 @@ OPTIONAL:
       --cpu <n>                   vCPU count.                   (default: 2)
       --memory <size>             RAM, e.g. 4Gi or 2048Mi.      (default: 4Gi)
       --disk-size <size>          Root disk size, e.g. 40Gi.   (default: 40Gi)
-      --storage-class <name>      Storage class for the root disk. If not set, uses cluster default.
       --count <n>                 Number of VMs to create.      (default: 1)
                                   Names are suffixed with the index when >1
                                   (e.g. my-vm-0, my-vm-1, …).
@@ -176,7 +174,6 @@ while [[ $# -gt 0 ]]; do
     --cpu)                   CPU="$2"; shift 2 ;;
     --memory)                MEMORY="$2"; shift 2 ;;
     --disk-size)             DISK_SIZE="$2"; shift 2 ;;
-    --storage-class)         STORAGE_CLASS="$2"; shift 2 ;;
     --count)                 VM_COUNT="$2"; shift 2 ;;
     --mac-address)           MAC_ADDRESS="$2"; shift 2 ;;
     --boot)
@@ -489,7 +486,6 @@ network_namespace  = "${NETWORK_NAMESPACE}"
 cpu                = ${CPU}
 memory             = "${MEMORY}"
 disk_size          = "${DISK_SIZE}"
-storage_class_name = "${STORAGE_CLASS}"
 vm_count           = ${VM_COUNT}
 mac_addresses      = ${mac_tf_list}
 efi                = ${EFI}

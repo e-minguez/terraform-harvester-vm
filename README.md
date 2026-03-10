@@ -93,16 +93,6 @@ The modules have **separate state files**. Running `terraform destroy` on the `v
   --boot bios \
   ./my-image.qcow2
 
-# Create a VM with a specific storage class for the root disk
-./harvester-vm.sh \
-  -k ~/.kube/harvester.yaml \
-  -n my-vm \
-  --vm-namespace default \
-  --network vlan10 \
-  --image-source existing \
-  --image-name image-74wx4 \
-  --storage-class longhorn-fast
-
 # Upload an image with a specific storage class
 ./harvester-vm.sh \
   -k ~/.kube/harvester.yaml \
@@ -110,7 +100,6 @@ The modules have **separate state files**. Running `terraform destroy` on the `v
   --vm-namespace default \
   --network vlan10 \
   --image-storage-class longhorn-fast \
-  --storage-class longhorn-fast \
   ./my-image.qcow2
 
 # Destroy only the VM (image is preserved)
@@ -162,7 +151,6 @@ Run `./harvester-vm.sh --help` for all options.
 | `--cpu` | `2` | Number of vCPUs (must be ≥ 1) |
 | `--memory` | `4Gi` | RAM — must match `^[0-9]+(Mi\|Gi)$` (e.g. `4Gi`, `2048Mi`) |
 | `--disk-size` | `40Gi` | Root disk size — must match `^[0-9]+(Mi\|Gi)$` (e.g. `40Gi`, `100Gi`) |
-| `--storage-class` | — | Storage class for the root disk. If not set, uses the cluster default |
 | `--count` | `1` | Number of VMs to create. Names are suffixed with the index when > 1 (e.g. `my-vm-0`, `my-vm-1`) |
 | `--mac-address` | — | MAC address(es), comma-separated (e.g. `AA:BB:CC:DD:EE:FF` or `AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02`). Positionally matched to VMs; missing entries auto-assign |
 | `--boot` | `uefi` | Boot firmware: `uefi` (default) or `bios` |
@@ -222,9 +210,6 @@ module "vm" {
   image_namespace   = module.image.image_namespace
   network_name      = "vlan10"
   network_namespace = "default"
-
-  # Optional: specify storage class
-  # storage_class_name = "longhorn-fast"
 }
 ```
 
@@ -275,9 +260,6 @@ module "vm" {
   # Optional: create multiple VMs
   # vm_count      = 3
   # mac_addresses = ["AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"]
-
-  # Optional: specify storage class
-  # storage_class_name = "longhorn-fast"
 }
 ```
 
@@ -310,7 +292,6 @@ module "vm" {
 | `cpu` | `number` | `2` | vCPU count (≥ 1) |
 | `memory` | `string` | `"4Gi"` | RAM (e.g. `4Gi`, `2048Mi`) |
 | `disk_size` | `string` | `"40Gi"` | Root disk size (e.g. `40Gi`, `100Gi`) |
-| `storage_class_name` | `string` | `""` | Storage class for the root disk. If not set, uses the cluster default |
 | `vm_count` | `number` | `1` | Number of VMs to create. When > 1, names are suffixed with the index (`my-vm-0`, `my-vm-1`, …) |
 | `mac_addresses` | `list(string)` | `[]` | MAC addresses for the NICs, one per VM (positional). Missing entries auto-assign. |
 | `efi` | `bool` | `true` | Boot with UEFI firmware. Set to `false` for legacy BIOS. |

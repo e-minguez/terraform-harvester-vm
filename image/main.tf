@@ -172,9 +172,14 @@ resource "terraform_data" "upload_image" {
       echo "==> Waiting for VirtualMachineImage CRD and CDI upload proxy to be ready..."
       MAX_WAIT=300   # 300 × 1 s = 5 minutes
       i=0
+      LAST_HTTP_CODE=""
       while true; do
         if [ "$${i}" -ge "$${MAX_WAIT}" ]; then
           echo "ERROR: Timed out waiting for image to become upload-ready after $${MAX_WAIT}s." >&2
+          echo "       Last HTTP code from Harvester API: $${LAST_HTTP_CODE:-none}" >&2
+          echo "       Last API response body:" >&2
+          echo "$${RESP}" >&2
+          echo "       Run with HARVESTER_UPLOAD_DEBUG=1 for full trace output." >&2
           exit 1
         fi
 
@@ -184,6 +189,7 @@ resource "terraform_data" "upload_image" {
           "$${SERVER}/$${API_PATH}" || true)
         HTTP_CODE=$(echo "$${RESP_RAW}" | grep '^HTTPSTATUS:' | cut -c12-)
         RESP=$(echo "$${RESP_RAW}" | grep -v '^HTTPSTATUS:')
+        LAST_HTTP_CODE="$${HTTP_CODE}"
 
         if [ "$${HTTP_CODE}" = "200" ]; then
           # Detect CDI retry exhaustion — image must be deleted before we can retry.
@@ -202,11 +208,23 @@ resource "terraform_data" "upload_image" {
             exit 0
           fi
 
-          # CDI upload proxy is ready once the Initialized condition is present.
-          if echo "$${RESP}" | grep -q '"Initialized"'; then
+          # CDI upload proxy is ready once Initialized condition has status True.
+          # Harvester sets Initialized=False first (CRD created but proxy not yet ready),
+          # then transitions to Initialized=True once the upload endpoint is available.
+          # Matching only '"Initialized"' fires prematurely on the False state and sends
+          # the upload curl before CDI is ready; we must check status=True explicitly.
+          # Steve API serialises condition objects with alphabetical keys (compact JSON):
+          #   {"lastUpdateTime":"...","message":"","reason":"","status":"True","type":"Initialized"}
+          # so "status":"True" always appears directly before "type":"Initialized".
+          if echo "$${RESP}" | grep -qE '"status"\s*:\s*"True"\s*,\s*"type"\s*:\s*"Initialized"'; then
             echo "==> CDI upload proxy is ready."
             break
           fi
+        fi
+
+        # Print a progress heartbeat every 30 s so the user can see polling is active.
+        if [ $((i % 30)) -eq 0 ] && [ "$${i}" -gt 0 ]; then
+          echo "    (still waiting for CDI upload proxy... $${i}/$${MAX_WAIT}s, last HTTP $${HTTP_CODE:-none})"
         fi
 
         i=$((i + 1))

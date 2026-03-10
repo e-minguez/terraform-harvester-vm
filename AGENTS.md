@@ -68,7 +68,7 @@ There are no automated tests beyond `terraform validate` / `tofu validate` and `
 `terraform_data.upload_image` is a `local-exec` provisioner that:
 1. Pre-computes file size with `stat` (not `wc -c`) **before** the polling loop begins. `wc -c` reads the entire file on macOS; for large images this burns seconds from CDI's countdown window.
 2. Polls `GET /v1/harvester/harvesterhci.io.virtualmachineimages/{ns}/{name}` every 1 s using a **single curl per iteration** — HTTP status is embedded via `-w '\nHTTPSTATUS:%{http_code}'` so no second round-trip is needed to fetch the body.
-3. Immediately streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` — zero delay between detecting `Initialized` and sending data.
+3. Immediately streams the binary via `curl -F "chunk=@<file>;type=application/octet-stream" "...?action=upload&size=<bytes>"` — zero delay between detecting `Initialized` (status=True) and sending data.
 4. After any `curl` failure, rechecks image state — exits 0 if the image is already `Active` (handles 504 gateway timeouts from nginx).
 
 CDI starts an internal countdown once the CRD is created. If no data begins flowing within ~2 minutes of CDI reporting `Initialized`, CDI fails with `timeout waiting for the datasource file processing begin`. After exhausting retries the image is permanently marked `RetryLimitExceeded` and must be deleted before a new upload can be attempted.
@@ -135,6 +135,7 @@ Use `lifecycle.precondition` for cross-variable checks that `variable` validatio
 - Do not move the `IMAGE_SIZE` computation into the polling loop or after it — it must run before polling so the upload starts with zero delay once CDI is ready.
 - Do not revert the polling loop back to two curl calls per iteration (one for HTTP code + one for body) — the single-curl approach with `-w '\nHTTPSTATUS:%{http_code}'` halves overhead and is intentional.
 - Do not increase the poll sleep back to 2 s — 1 s is intentional to minimise detection latency for the `Initialized` condition.
+- Do not simplify the `Initialized` condition check back to `grep -q '"Initialized"'` — Harvester sets `Initialized=False` when the CRD is first created, then transitions to `Initialized=True` once CDI's upload proxy is ready. Matching only the presence of the string fires prematurely on the `False` state and sends the upload curl before CDI is ready. The check must verify `"status":"True"` alongside the condition type.
 - Do not remove or weaken `variable` validation blocks or `lifecycle.precondition` blocks — format and constraint validation lives in the Terraform modules.
 - Do not remove the `--cpu` / `--memory` / `--disk-size` pre-flight checks in `harvester-vm.sh` — they mirror `vm/variables.tf` and must stay in sync with it so the script fails fast before touching any state.
 - Do not add interactive prompts to `harvester-vm.sh` — it must remain fully non-interactive.
